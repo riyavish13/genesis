@@ -1,6 +1,6 @@
 "use client";
 import AutoComplete from "@/app/components/AutoComplete";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 type Option = {
   label: string | number;
@@ -8,64 +8,74 @@ type Option = {
   info?: string;
 };
 
+const BASE_URL = "https://cis.app.miratsapiservices.com/v2/cis/countries";
+
 const AutoCompletePage = () => {
-  const [value, setValue] = useState<Option[]>([]);
+  const [multiValue, setMultiValue] = useState<Option[]>([]);
+  const [singleValue, setSingleValue] = useState<Option[]>([]);
+  const [data, setData] = useState<Option[]>([]);
+  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const fetchCountries = async ({
-    query,
-    page,
-  }: {
-    query: string;
-    page: number;
-  }) => {
-    const res = await fetch(
-      `https://cis.app.miratsapiservices.com/v2/cis/countries?page=${page}&limit=10&search=${query}`,
-    );
+  useEffect(() => {
+    const timeout = setTimeout(async () => {
+      try {
+        setLoading(true);
 
-    const json = await res.json();
+        const res = await fetch(
+          `${BASE_URL}?page=${page}&limit=10&search=${encodeURIComponent(query)}`,
+        );
+        const json = await res.json();
 
-    return {
-      data: json.data.map((country: any) => ({
-        label: country.name,
-        value: country.alpha2Code,
-        info: country.alpha3Code,
-      })),
-      hasMore: json.pagination?.hasNextPage,
-    };
+        const incoming =
+          json?.data?.map((c: any) => ({
+            label: c.name,
+            value: c.alpha2Code,
+            info: c.alpha3Code,
+          })) || [];
+
+        setData((prev) => (page === 1 ? incoming : [...prev, ...incoming]));
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }, 100);
+
+    return () => clearTimeout(timeout);
+  }, [page, query]);
+
+  const onSearch = ({ query: q, page: p }: { query: string; page: number }) => {
+    setQuery(q);
+    setPage(p);
   };
-
   return (
-    <div className="flex flex-col justify-center gap-5 py-20 max-w-xl mx-auto w-full">
-      {value?.map((data) => data?.label).join(", ")}
-
-      <div className="flex justify-center gap-5 py-20">
-        {/* MULTIPLE */}
-        <AutoComplete
-          selected={value}
-          setSelected={setValue}
-          multiple
-          options={[]}
-          search
-          dropdownFooter
-          apiSearch={fetchCountries}
-          onApply={() => {
-            console.log("Selected values:", value);
-          }}
-        />
-
-        <AutoComplete
-          selected={value}
-          setSelected={setValue}
-          search
-          options={[]}
-          position="top"
-          dropdownFooter
-          apiSearch={fetchCountries}
-          onApply={() => {
-            console.log("Selected values:", value);
-          }}
-        />
-      </div>
+    <div className="flex justify-center gap-5 py-20 max-w-5xl mx-auto">
+      <AutoComplete
+        selected={multiValue}
+        setSelected={setMultiValue}
+        multiple
+        search
+        dropdownFooter
+        dropdownText="Select Multiple"
+        options={data}
+        hasMore={true}
+        loading={loading}
+        onSearch={onSearch}
+        onApply={() => console.log("Applied:", multiValue)}
+      />
+      <AutoComplete
+        selected={singleValue}
+        setSelected={setSingleValue}
+        search
+        position="top"
+        dropdownText="Select one"
+        options={data}
+        hasMore={true}
+        loading={loading}
+        onSearch={onSearch}
+      />
     </div>
   );
 };

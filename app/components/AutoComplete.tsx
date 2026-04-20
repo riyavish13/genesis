@@ -7,12 +7,13 @@ import React, {
   forwardRef,
   useRef,
   useImperativeHandle,
+  JSX,
 } from "react";
 import { RiArrowDownSLine, RiSearchLine } from "@remixicon/react";
 import { cn } from "../utils/utils";
 import Input from "./Input";
-import Label from "./Label";
 import Checkbox from "./Checkbox";
+import Label from "./Label";
 
 type Option = {
   label: string | number;
@@ -30,7 +31,6 @@ interface MenuItemProps {
 interface DropdownProps {
   id?: string;
   icon?: JSX.Element;
-  options: Option[];
   selected?: Option[];
   setSelected?: React.Dispatch<React.SetStateAction<Option[]>>;
   onApply?: () => void;
@@ -45,21 +45,20 @@ interface DropdownProps {
   disabled?: boolean;
   footerAction?: React.ReactNode;
   height?: string;
-  apiSearch?: (params: {
-    query: string;
-    page: number;
-  }) => Promise<{ data: Option[]; hasMore: boolean }>;
+  onSearch: (params: { query: string; page: number }) => void;
+  options: Option[];
+  hasMore?: boolean;
+  loading?: boolean;
 }
 
-const defaultRenderItem = (option: Option) => {
-  return <MenuItem label={option.label} value={option.value} />;
-};
+const defaultRenderItem = (option: Option) => (
+  <MenuItem label={option.label} value={option.value} />
+);
 
 const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
   (
     {
       id = `dropdown-${Math.random().toString(36).substring(2, 11)}`,
-      options,
       selected,
       setSelected,
       search = false,
@@ -75,56 +74,38 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
       onReset,
       footerAction,
       height = "200px",
-      apiSearch,
+      onSearch,
+      options,
+      hasMore = false,
+      loading = false,
     },
     ref,
   ) => {
-    const [searchQuery, setSearchQuery] = useState<string>("");
-    const [filteredOptions, setFilteredOptions] = useState<Option[]>(
-      options || [],
-    );
-
-    const [page, setPage] = useState(1);
-    const [loading, setLoading] = useState(false);
-    const [hasMore, setHasMore] = useState(true);
-
+    const [searchQuery, setSearchQuery] = useState("");
+    const [currentPage, setCurrentPage] = useState(1);
     const [dropdownMenu, setDropdownMenu] = useState(false);
+
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useImperativeHandle(ref, () => dropdownRef.current!);
 
     useEffect(() => {
-      if (!apiSearch && options) {
-        setFilteredOptions(options);
-      }
-    }, [options, apiSearch]);
+      onSearch({ query: "", page: 1 });
+    }, [onSearch]);
 
-    const memoizedFilteredOptions = useMemo(() => {
-      if (apiSearch) return filteredOptions; // API handles filtering
+    useEffect(() => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
 
-      if (!search) return filteredOptions;
+      debounceRef.current = setTimeout(() => {
+        setCurrentPage(1);
+        onSearch({ query: searchQuery, page: 1 });
+      }, 400);
 
-      return filteredOptions.filter((option) => {
-        if (typeof option.label === "string") {
-          return option.label.toLowerCase().includes(searchQuery.toLowerCase());
-        }
-        return option.label.toString().includes(searchQuery.toLowerCase());
-      });
-    }, [search, searchQuery, filteredOptions, apiSearch]);
-
-    const mergedOptions = useMemo(() => {
-      if (!multiple) return memoizedFilteredOptions;
-
-      const merged = [...memoizedFilteredOptions];
-
-      (selected || []).forEach((item) => {
-        if (!merged.some((opt) => opt.value === item.value)) {
-          merged.unshift(item); // keep selected on top
-        }
-      });
-
-      return merged;
-    }, [memoizedFilteredOptions, selected, multiple]);
+      return () => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+      };
+    }, [searchQuery, onSearch]);
 
     const handleSearchChange = useCallback(
       (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,61 +114,37 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
       [],
     );
 
-    const debounceRef = useRef<NodeJS.Timeout | null>(null);
+    const handleScroll = (e: React.UIEvent<HTMLElement>) => {
+      const target = e.currentTarget;
+      const nearBottom =
+        target.scrollTop + target.clientHeight >= target.scrollHeight - 10;
 
-    const fetchOptions = async (
-      pageNumber: number,
-      query: string,
-      reset = false,
-    ) => {
-      if (!apiSearch) return;
-
-      setLoading(true);
-
-      try {
-        const res = await apiSearch({
-          query,
-          page: pageNumber,
-        });
-
-        setFilteredOptions((prev) =>
-          reset ? res.data : [...prev, ...res.data],
-        );
-
-        setHasMore(res.hasMore);
-      } catch (err) {
-        console.error("Dropdown API error:", err);
-      } finally {
-        setLoading(false);
+      if (nearBottom && hasMore && !loading) {
+        const nextPage = currentPage + 1;
+        setCurrentPage(nextPage);
+        onSearch({ query: searchQuery, page: nextPage });
       }
     };
 
-    useEffect(() => {
-      if (!search || !apiSearch) return;
+    const mergedOptions = useMemo(() => {
+      if (!multiple) return options;
 
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-
-      debounceRef.current = setTimeout(() => {
-        setPage(1);
-        fetchOptions(1, searchQuery, true);
-      }, 400);
-
-      return () => {
-        if (debounceRef.current) {
-          clearTimeout(debounceRef.current);
+      const merged = [...options];
+      (selected || []).forEach((item) => {
+        if (!merged.some((opt) => opt.value === item.value)) {
+          merged.unshift(item);
         }
-      };
-    }, [searchQuery]);
+      });
+      return merged;
+    }, [options, selected, multiple]);
 
     const toggleOption = useCallback(
       (option: Option) => {
         if (multiple && setSelected) {
-          setSelected((prevSelected) =>
-            prevSelected.some((item) => item.value === option.value)
-              ? prevSelected.filter((item) => item.value !== option.value)
-              : [...prevSelected, option],
+          setSelected((prev) =>
+            prev.some((item) => item.value === option.value)
+              ? prev.filter((item) => item.value !== option.value)
+              : [...prev, option],
           );
         } else if (setSelected) {
           setSelected([option]);
@@ -200,10 +157,10 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
     const handleCheckboxChange = useCallback(
       (option: Option) => {
         if (multiple && setSelected) {
-          setSelected((prevSelected) =>
-            prevSelected.some((item) => item.value === option.value)
-              ? prevSelected.filter((item) => item.value !== option.value)
-              : [...prevSelected, option],
+          setSelected((prev) =>
+            prev.some((item) => item.value === option.value)
+              ? prev.filter((item) => item.value !== option.value)
+              : [...prev, option],
           );
         } else if (setSelected) {
           setSelected([option]);
@@ -212,53 +169,27 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
       [multiple, setSelected],
     );
 
-    const updateSelection = useCallback(
-      (option: Option, closeOnSelect = false) => {
-        if (!setSelected) return;
-
-        setSelected((prev = []) =>
-          multiple
-            ? prev.some((i) => i.value === option.value)
-              ? prev.filter((i) => i.value !== option.value)
-              : [...prev, option]
-            : [option],
-        );
-
-        if (!multiple && closeOnSelect) {
-          setDropdownMenu(false);
-        }
-      },
-      [multiple, setSelected],
-    );
-
     const handleSelectAll = () => {
-      if (selected?.length === filteredOptions.length) {
+      if (selected?.length === options.length) {
         setSelected?.([]);
       } else {
-        setSelected?.(filteredOptions);
+        setSelected?.(options);
       }
     };
 
     const handleReset = () => {
-      if (onReset) {
-        onReset();
-      }
-
+      onReset?.();
       setSelected?.([]);
       setSearchQuery("");
-      setPage(1);
+      setCurrentPage(1);
       setDropdownMenu(false);
-
-      if (apiSearch) {
-        fetchOptions(1, "", true);
-      }
+      onSearch({ query: "", page: 1 });
     };
 
     useEffect(() => {
       document.addEventListener("mousedown", handleClickOutside);
-      return () => {
+      return () =>
         document.removeEventListener("mousedown", handleClickOutside);
-      };
     }, []);
 
     const handleClickOutside = (event: MouseEvent) => {
@@ -270,12 +201,6 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
       }
     };
 
-    useEffect(() => {
-      if (apiSearch) {
-        fetchOptions(1, "", true);
-      }
-    }, []);
-
     return (
       <div
         id={id}
@@ -285,9 +210,7 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
           !width && "w-full",
           disabled && "cursor-not-allowed opacity-50",
         )}
-        style={{
-          width: width,
-        }}
+        style={{ width }}
       >
         <button
           type="button"
@@ -317,13 +240,12 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
                 ? (selected?.length ?? 0) > 0
                   ? `${selected?.length} Selected`
                   : dropdownText
-                : selected?.[0]?.label
-                  ? selected?.[0]?.label
-                  : dropdownText}
+                : (selected?.[0]?.label ?? dropdownText)}
             </span>
           </section>
           <RiArrowDownSLine aria-hidden="true" size={18} />
         </button>
+
         <ul
           role="listbox"
           aria-multiselectable={multiple}
@@ -350,13 +272,14 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
               endIcon={<RiSearchLine size={18} />}
             />
           )}
+
           {multiple && (
             <section className="py-[6px] px-[14px] flex justify-between items-center">
               <button
                 type="button"
                 aria-label="Select all"
                 onClick={handleSelectAll}
-                className="text-sm  hover:text-primary-700 text-primary-600 cursor-pointer"
+                className="text-sm hover:text-primary-700 text-primary-600 cursor-pointer"
               >
                 Select all
               </button>
@@ -370,23 +293,11 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
               </button>
             </section>
           )}
+
           <section
             style={{ maxHeight: height }}
             className="z-[1000] transition-all duration-75 delay-100 ease-in-out overflow-y-scroll"
-            onScroll={(e) => {
-              const target = e.currentTarget;
-
-              if (
-                target.scrollTop + target.clientHeight >=
-                  target.scrollHeight - 20 &&
-                hasMore &&
-                !loading
-              ) {
-                const nextPage = page + 1;
-                setPage(nextPage);
-                fetchOptions(nextPage, searchQuery);
-              }
-            }}
+            onScroll={handleScroll}
           >
             {mergedOptions?.map((option, i) => (
               <React.Fragment key={i}>
@@ -398,7 +309,6 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
                         "opacity-50 cursor-not-allowed hover:bg-white text-gray-300 select-none",
                     )}
                     htmlFor={`${id}-checkbox-${option.value}`}
-                    key={i}
                   >
                     <section className="flex items-center justify-between gap-2 w-full">
                       <div className="flex gap-2">
@@ -433,7 +343,6 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
                   </Label>
                 ) : (
                   <Label
-                    key={i}
                     htmlFor={`${id}-checkbox-${option.value}`}
                     className={cn(
                       "py-[6px] px-[14px] hover:bg-gray-50 border-l-4 border-transparent cursor-pointer w-full flex flex-col gap-1",
@@ -481,6 +390,7 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
               </div>
             )}
           </section>
+
           {footerAction && (
             <div className="py-2 mt-1 px-2 border-t">{footerAction}</div>
           )}
@@ -496,38 +406,32 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
   },
 );
 
-export const MenuItem: React.FC<MenuItemProps> = ({ label }) => {
-  return <p className="break-all">{label}</p>;
-};
+export const MenuItem: React.FC<MenuItemProps> = ({ label }) => (
+  <p className="break-all">{label}</p>
+);
 
 interface DropdownFooterProps {
-  onApply?: (() => void) | undefined;
+  onApply?: () => void;
   setDropdownMenu?: (value: boolean) => void;
 }
 
 export const DropdownFooter: React.FC<DropdownFooterProps> = ({
   onApply,
   setDropdownMenu,
-}) => {
-  return (
-    <div className="flex justify-end border-t border-gray-200 px-[14px] py-[8px] text-sm">
-      <button
-        type="button"
-        className="text-primary-600 hover:text-primary-700"
-        onClick={() => {
-          if (onApply) {
-            onApply();
-          }
-          if (setDropdownMenu) {
-            setDropdownMenu(false);
-          }
-        }}
-      >
-        Apply
-      </button>
-    </div>
-  );
-};
+}) => (
+  <div className="flex justify-end border-t border-gray-200 px-[14px] py-[8px] text-sm">
+    <button
+      type="button"
+      className="text-primary-600 hover:text-primary-700"
+      onClick={() => {
+        onApply?.();
+        setDropdownMenu?.(false);
+      }}
+    >
+      Apply
+    </button>
+  </div>
+);
 
 AutoComplete.displayName = "AutoComplete";
 
