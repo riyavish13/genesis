@@ -87,25 +87,29 @@ const AutoComplete = forwardRef<HTMLDivElement, DropdownProps>(
 
     const dropdownRef = useRef<HTMLDivElement>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const onSearchRef = useRef(onSearch);
 
     useImperativeHandle(ref, () => dropdownRef.current!);
+    useEffect(() => {
+      onSearchRef.current = onSearch;
+    });
 
     useEffect(() => {
-      onSearch({ query: "", page: 1 });
-    }, [onSearch]);
+      onSearchRef.current({ query: "", page: 1 });
+    }, []);
 
     useEffect(() => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
 
       debounceRef.current = setTimeout(() => {
         setCurrentPage(1);
-        onSearch({ query: searchQuery, page: 1 });
-      }, 400);
+        onSearchRef.current({ query: searchQuery, page: 1 });
+      }, 500);
 
       return () => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
       };
-    }, [searchQuery, onSearch]);
+    }, [searchQuery]);
 
     const handleSearchChange = useCallback(
       (e: React.ChangeEvent<HTMLInputElement>) => {

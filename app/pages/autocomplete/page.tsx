@@ -41,7 +41,7 @@ const AutoCompletePage = () => {
       } finally {
         setLoading(false);
       }
-    }, 100);
+    }, 400);
 
     return () => clearTimeout(timeout);
   }, [page, query]);
@@ -51,7 +51,7 @@ const AutoCompletePage = () => {
     setPage(p);
   };
   return (
-    <div className="flex justify-center gap-5 py-20 max-w-5xl mx-auto">
+    <div className="flex justify-center gap-5 p-20 max-w-5xl mx-auto">
       <AutoComplete
         selected={multiValue}
         setSelected={setMultiValue}
